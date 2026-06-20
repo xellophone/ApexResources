@@ -1,0 +1,105 @@
+// Trigger
+
+ if(Trigger.isBefore){
+        if(Trigger.isUpdate){
+            ReservationTriggerHelper.afterCancelInsert(Trigger.new, Trigger.oldMap);
+        }
+    }
+
+
+
+// Helper ..............................................
+public static void waitingList(List<Reservation__c> inputList){
+        Set<Id> trainIds = new Set<Id>();
+        for(Reservation__c res : inputList){
+            trainIds.add(res.Train__c);
+        }
+        
+		Set<Id> fullTrainList = new Set<Id>();
+
+        Map<Id, Decimal> trainMap = new Map<Id, Decimal>();
+        for(Train__c tc : [SELECT Id, Name, Available__c FROM Train__c WHERE Id IN :trainIds]){
+            Integer available = (Integer)tc.Available__c;
+            trainMap.put(tc.Id, tc.Available__c);
+        }
+        
+        List<RailWaitingFunc__e> eventsToPublish = new List<RailWaitingFunc__e>();
+        for(Reservation__c res : inputList){
+            Integer curr = (Integer)res.Number_of_Seats__c;
+            Integer total = (Integer)trainMap.get(res.Train__c);
+            
+            if(curr > total){
+                RailWaitingFunc__e eve = new RailWaitingFunc__e();
+                eve.Passenger_Id__c = res.Passenger__c;
+                eve.Train_Id__c = res.Train__c;
+                eve.Number_Of_Seats__c = res.Number_of_Seats__c;
+                eve.Quota__c = res.Quota__c;
+                eve.Journey_Date__c = res.Journey_Date__c;
+                eventsToPublish.add(eve);
+                System.debug('Event added');
+                res.addError('You are added into the waiting List');
+            }
+        }
+        
+        if(!eventsToPublish.isEmpty()){
+            EventBus.publish(eventsToPublish);
+            System.debug('Events published');
+        }
+        
+    }
+
+
+	// Add waiting record after cancellation 
+    public static void afterCancelInsert(List<Reservation__c> newList, Map<Id, Reservation__c> oldMap){
+        List<Reservation__c> resList = new List<Reservation__c>();
+        Set<Id> cancelledReservations = new Set<Id>();
+        for(Reservation__c res : newList){
+            if(res.Reservation_Status__c == 'Cancelled'){
+                if(oldMap.get(res.Id).Reservation_Status__c == 'Confirmed'){
+                    resList.add(res);
+                }
+            }
+        }
+
+        List<Reservation__c> resToInsert = new List<Reservation__c>();
+        for(Rail_Waiting_List__c wt : [SELECT Id, Name, Passenger__c, Train__c, Journey_Date__c, Number_of_Seats__c, Quota__c 
+                                       FROM Rail_Waiting_List__c ORDER BY CreatedDate LIMIT :resList.size()]){
+            Reservation__c res = new Reservation__c();
+            res.Passenger__c = wt.Passenger__c;
+            res.Train__c = wt.Train__c;
+            res.Journey_Date__c = wt.Journey_Date__c;
+            res.Number_of_Seats__c = wt.Number_of_Seats__c;
+            res.Quota__c = wt.Quota__c;
+            resToInsert.add(res);
+        }
+        
+        if(!resToInsert.isEmpty()){
+            Database.Insert(resToInsert);
+        }
+        
+    }    
+
+
+    // Platform Event trigger .......................................
+
+    
+    trigger RailWaitingFuncTrigger on RailWaitingFunc__e (after insert) {
+    List<Rail_Waiting_List__c> wList = new List<Rail_Waiting_List__c>();
+    
+    for (RailWaitingFunc__e eve : Trigger.new) {
+        Rail_Waiting_List__c wt = new Rail_Waiting_List__c();
+        wt.Passenger__c = eve.Passenger_Id__c;
+        wt.Train__c = eve.Train_Id__c;
+        wt.Journey_Date__c = eve.Journey_Date__c;
+        wt.Number_of_Seats__c = eve.Number_Of_Seats__c;
+        wt.Quota__c = eve.Quota__c;
+        wList.add(wt);
+    }
+    
+    if (!wList.isEmpty()) {
+        Database.insert(wList);
+        System.debug('Inserted');
+    }
+}
+
+
