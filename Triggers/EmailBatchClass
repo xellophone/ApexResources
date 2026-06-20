@@ -1,0 +1,52 @@
+global class BookingEmailTemplateBatch implements Database.Batchable<SObject> {
+
+    global Database.QueryLocator start(Database.BatchableContext bc) {
+
+        return Database.getQueryLocator([
+            SELECT Id, Name, Email__c, Contact__c, Status__c
+            FROM Booking__c
+            WHERE Email__c != null
+        ]);
+    }
+
+    global void execute(Database.BatchableContext bc, List<Booking__c> scope) {
+
+        // Get Email Template
+        EmailTemplate template = [
+            SELECT Id
+            FROM EmailTemplate
+            WHERE DeveloperName = 'Booking_Status_Template'
+            LIMIT 1
+        ];
+
+        List<Messaging.SingleEmailMessage> emails =
+            new List<Messaging.SingleEmailMessage>();
+
+        for (Booking__c b : scope) {
+
+            Messaging.SingleEmailMessage mail =
+                new Messaging.SingleEmailMessage();
+
+            // Template usage
+            mail.setTemplateId(template.Id);
+
+            // Recipient (must be Contact or User Id)
+            mail.setTargetObjectId(b.Contact__c);
+
+            // Related record for merge fields
+            mail.setWhatId(b.Id);
+
+            mail.setSaveAsActivity(false);
+
+            emails.add(mail);
+        }
+
+        if (!emails.isEmpty()) {
+            Messaging.sendEmail(emails);
+        }
+    }
+
+    global void finish(Database.BatchableContext bc) {
+        System.debug('Batch Email Job Completed');
+    }
+}
