@@ -1,3 +1,41 @@
+// Template body ................................................
+
+Step 1: Create Visualforce Email Template
+
+Go to:
+Setup → Classic Email Templates → New → Visualforce
+
+Template Code:
+<messaging:emailTemplate 
+    subject="Your Booking has been Cancelled"
+    recipientType="Contact"
+    relatedToType="Booking__c">
+
+    <messaging:htmlEmailBody>
+
+        <html>
+            <body>
+                <p>Dear {!recipient.Name},</p>
+
+                <p>Your booking has been <b>cancelled</b>.</p>
+
+                <p><b>Booking Details:</b></p>
+                <ul>
+                    <li>Name: {!relatedTo.Name}</li>
+                    <li>Status: {!relatedTo.Status__c}</li>
+                    <li>Date: {!relatedTo.Date__c}</li>
+                </ul>
+
+                <p>Regards,<br/>Support Team</p>
+            </body>
+        </html>
+
+    </messaging:htmlEmailBody>
+
+</messaging:emailTemplate>
+
+
+
 // Trigger ........................................
 trigger BookingTrigger on Booking__c (before update) {
 
