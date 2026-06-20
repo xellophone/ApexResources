@@ -1,0 +1,94 @@
+// Trigger ................................................
+trigger BookingTrigger on Booking__c (before insert) {
+
+    if (Trigger.isBefore && Trigger.isInsert) {
+        BookingTriggerHelper.allocateSeats(Trigger.new);
+    }
+}
+
+
+// Helper ......................................................
+
+public class BookingTriggerHelper {
+
+    public static void allocateSeats(List<Booking__c> newRecords) {
+
+        Set<Id> eventIds = new Set<Id>();
+
+        for (Booking__c b : newRecords) {
+            if (b.Event__c != null) {
+                eventIds.add(b.Event__c);
+            }
+        }
+
+        Map<Id, Event__c> eventMap = new Map<Id, Event__c>([
+            SELECT Id, Available_Seats__c
+            FROM Event__c
+            WHERE Id IN :eventIds
+            FOR UPDATE
+        ]);
+
+        List<Waiting_List__c> waitingListToInsert = new List<Waiting_List__c>();
+
+        for (Booking__c b : newRecords) {
+
+            Event__c ev = eventMap.get(b.Event__c);
+
+            if (ev == null) {
+                b.addError('Invalid Event selected');
+                continue;
+            }
+
+            Integer available = (Integer) ev.Available_Seats__c;
+            Integer requested = (Integer) b.Requested_Seats__c;
+
+            if (requested <= 0) {
+                b.addError('Requested seats must be greater than 0');
+                continue;
+            }
+
+            // CASE 1: Enough seats
+            if (available >= requested) {
+
+                b.Allocated_Seats__c = requested;
+                ev.Available_Seats__c -= requested;
+            }
+
+            // CASE 2: Partial availability (your requirement)
+            else if (available > 0) {
+
+                // Booking gets only available seats
+                b.Allocated_Seats__c = available;
+
+                // Create waiting list for remaining seats
+                waitingListToInsert.add(new Waiting_List__c(
+                    Event__c = b.Event__c,
+                    Seat_Count__c = requested - available,
+                    Status__c = 'Waiting'
+                ));
+
+                ev.Available_Seats__c = 0;
+            }
+
+            // CASE 3: No seats available
+            else {
+
+                b.Allocated_Seats__c = 0;
+
+                waitingListToInsert.add(new Waiting_List__c(
+                    Event__c = b.Event__c,
+                    Seat_Count__c = requested,
+                    Status__c = 'Waiting'
+                ));
+            }
+        }
+
+        // Insert waiting list records
+        if (!waitingListToInsert.isEmpty()) {
+            insert waitingListToInsert;
+        }
+
+        // Update event seats
+        update eventMap.values();
+    }
+}
