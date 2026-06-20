@@ -1,0 +1,206 @@
+
+# Architecture (Batch Version)
+
+REST API
+   ↓
+Store JSON (Platform Object / Custom Object)
+   ↓
+Batch Apex
+   ↓
+Insert Accounts (scope-wise)
+   ↓
+Insert Contacts (mapped)
+
+
+# 1. Staging Object (Required Best Practice)
+
+Create a custom object:
+
+### `Account_Staging__c`
+
+Fields:
+
+* `Payload__c` (Long Text Area – stores JSON)
+* `Status__c` (New / Processing / Completed / Failed)
+
+---
+
+# 2. REST API (Stores Data Only)
+
+@RestResource(urlMapping='/bulkAccounts/*')
+global with sharing class AccountBulkRest {
+
+    @HttpPost
+    global static String createAccounts() {
+
+        RestRequest req = RestContext.request;
+        String body = req.requestBody.toString();
+
+        Account_Staging__c stage = new Account_Staging__c();
+        stage.Payload__c = body;
+        stage.Status__c = 'New';
+
+        insert stage;
+
+        return 'Request received. Batch processing started.';
+    }
+}
+
+---
+
+# 📌 3. Batch Apex (Core Processing Engine)
+
+global class AccountBulkBatch implements Database.Batchable<Account_Staging__c> {
+
+    global Database.QueryLocator start(Database.BatchableContext bc) {
+
+        return Database.getQueryLocator([
+            SELECT Id, Payload__c
+            FROM Account_Staging__c
+            WHERE Status__c = 'New'
+        ]);
+    }
+
+    global void execute(Database.BatchableContext bc,
+                        List<Account_Staging__c> scope) {
+
+        List<Account> accList = new List<Account>();
+        List<Contact> conList = new List<Contact>();
+
+        List<Account_Staging__c> updateStage = new List<Account_Staging__c>();
+
+        for (Account_Staging__c stg : scope) {
+
+            try {
+
+                AccountBulkWrapper wrapper =
+                    (AccountBulkWrapper) JSON.deserialize(
+                        stg.Payload__c,
+                        AccountBulkWrapper.class
+                    );
+
+                Map<Integer, Account> indexToAccount = new Map<Integer, Account>();
+
+                Integer index = 0;
+
+                // Create Accounts
+                for (AccountWrapper aw : wrapper.accounts) {
+
+                    Account acc = new Account(
+                        Name = aw.name,
+                        Phone = aw.phone
+                    );
+
+                    accList.add(acc);
+                    indexToAccount.put(index, acc);
+                    index++;
+                }
+
+                insert accList;
+
+                index = 0;
+
+                // Create Contacts
+                for (AccountWrapper aw : wrapper.accounts) {
+
+                    Account insertedAcc = accList[index];
+
+                    if (aw.contacts != null) {
+
+                        for (ContactWrapper cw : aw.contacts) {
+
+                            conList.add(new Contact(
+                                FirstName = cw.firstName,
+                                LastName = cw.lastName,
+                                Email = cw.email,
+                                AccountId = insertedAcc.Id
+                            ));
+                        }
+                    }
+
+                    index++;
+                }
+
+                if (!conList.isEmpty()) {
+                    insert conList;
+                }
+
+                stg.Status__c = 'Completed';
+                updateStage.add(stg);
+
+            } catch (Exception e) {
+
+                stg.Status__c = 'Failed';
+                updateStage.add(stg);
+
+                System.debug('Error: ' + e.getMessage());
+            }
+        }
+
+        if (!updateStage.isEmpty()) {
+            update updateStage;
+        }
+    }
+
+    global void finish(Database.BatchableContext bc) {
+        System.debug('Batch processing completed');
+    }
+
+    // Wrapper classes
+    global class AccountBulkWrapper {
+        public List<AccountWrapper> accounts;
+    }
+
+    global class AccountWrapper {
+        public String name;
+        public String phone;
+        public List<ContactWrapper> contacts;
+    }
+
+    global class ContactWrapper {
+        public String firstName;
+        public String lastName;
+        public String email;
+    }
+}
+```
+
+---
+
+# 4. Scheduler (Optional for Auto Processing).............................................
+
+global class AccountBatchScheduler implements Schedulable {
+
+    global void execute(SchedulableContext sc) {
+        Database.executeBatch(new AccountBulkBatch(), 50);
+    }
+}
+```
+
+// Schedule .............................................
+
+System.schedule(
+    'Account Bulk Batch Job',
+    '0 0 * * * ?', // every hour
+    new AccountBatchScheduler()
+);
+
+
+# 📊 Flow Summary
+
+```text
+REST
+ ↓
+Staging Object
+ ↓
+Batch Apex (50 scope)
+ ↓
+Accounts Inserted
+ ↓
+Contacts Inserted
+ ↓
+Status Updated
+```
+
+
+Just tell 👍
