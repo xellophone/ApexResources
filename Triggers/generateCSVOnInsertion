@@ -1,0 +1,55 @@
+// Trigger
+trigger ContactTrigger on Contact (after insert) {
+    if(Trigger.isAfter && Trigger.isInsert){
+        
+        // generate csv 
+        ContactHelper.generateCSV(Trigger.new);
+    }
+}
+
+// Helper 
+public static void generateCSV(List<Contact> conList){
+        
+        String csvHeader = 'Id,Name,Email\n';
+        String csvBody = '';
+        
+        for (Contact con : conList) {
+            csvBody += con.Id + ',' +
+                con.Name + ',' +
+                (con.Email != null ? con.Email : '') +
+                '\n';
+        }
+        
+        ContentVersion cv = new ContentVersion();
+        cv.Title = 'Contacts_Export_' + Datetime.now().format('yyyyMMddHHmmss');
+        cv.PathOnClient = 'Contacts.csv';
+        cv.VersionData = Blob.valueOf(csvHeader + csvBody);
+        
+        insert cv;
+        
+        System.debug('File Generated: ' + cv.Title);
+        
+        // Fetch ContentDocumentId
+        cv = [
+            SELECT Id, ContentDocumentId
+            FROM ContentVersion
+            WHERE Id = :cv.Id
+            LIMIT 1
+        ];
+        
+        // (Optional) Link to Contacts so it appears in Related Files
+        List<ContentDocumentLink> links = new List<ContentDocumentLink>();
+        
+        for (Contact con : conList) {
+            ContentDocumentLink cdl = new ContentDocumentLink();
+            cdl.ContentDocumentId = cv.ContentDocumentId;
+            cdl.LinkedEntityId = con.Id;
+            cdl.ShareType = 'V';
+            cdl.Visibility = 'AllUsers';
+            links.add(cdl);
+        }
+        
+        if (!links.isEmpty()) {
+            insert links;
+        }
+    }
