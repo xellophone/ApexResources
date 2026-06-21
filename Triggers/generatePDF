@@ -15,7 +15,21 @@ In Salesforce Apex, you generate a PDF using a **Visualforce page rendered as PD
 
 </apex:page>
 ```
+<apex:page standardController="Booking__c" renderAs="pdf">
 
+    <h1>Booking Details</h1>
+
+    <p><b>Booking Name:</b> {!Booking__c.Name}</p>
+    <p><b>Booking Date:</b> {!Booking__c.Booking_Date__c}</p>
+    <p><b>Status:</b> {!Booking__c.Status__c}</p>
+
+    <h2>Event Details</h2>
+
+    <p><b>Event Name:</b> {!Booking__c.Event__r.Name}</p>
+    <p><b>Event Date:</b> {!Booking__c.Event__r.Event_Date__c}</p>
+    <p><b>Venue:</b> {!Booking__c.Event__r.Venue__c}</p>
+
+</apex:page>
 ---
 
 # 2. Generate PDF from Apex
