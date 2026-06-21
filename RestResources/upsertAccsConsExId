@@ -1,0 +1,284 @@
+{
+  "accounts": [
+    {
+      "externalAccountId": "ACC001",
+      "accountName": "Acme Corp",
+      "phone": "9999999999",
+      "website": "www.acme.com",
+      "contacts": [
+        {
+          "externalContactId": "CON001",
+          "firstName": "John",
+          "lastName": "Doe",
+          "email": "john@acme.com",
+          "mobilePhone": "9876543210"
+        },
+        {
+          "externalContactId": "CON002",
+          "firstName": "Jane",
+          "lastName": "Smith",
+          "email": "jane@acme.com",
+          "mobilePhone": "9876543211"
+        }
+      ]
+    }
+  ]
+}
+
+..................................................................
+Response
+
+[
+  {
+    "accountId": "001xx000003ABCDAA4",
+    "externalAccountId": "ACC001",
+    "status": "SUCCESS",
+    "contacts": [
+      {
+        "contactId": "003xx000004XYZAA2",
+        "externalContactId": "CON001",
+        "status": "SUCCESS"
+      },
+      {
+        "contactId": "003xx000004XYZAA3",
+        "externalContactId": "CON002",
+        "status": "SUCCESS"
+      }
+    ]
+  },
+  {
+    "accountId": "001xx000003ABCDEA4",
+    "externalAccountId": "ACC002",
+    "status": "SUCCESS",
+    "contacts": [
+      {
+        "contactId": "003xx000004XYZAA4",
+        "externalContactId": "CON003",
+        "status": "SUCCESS"
+      }
+    ]
+  }
+]
+
+.............................................................................
+
+@RestResource(urlMapping='/accounts/upsert')
+global with sharing class AccountContactUpsertService {
+
+```
+//=========================
+// Request Classes
+//=========================
+
+global class ContactRequest {
+    public String externalContactId;
+    public String firstName;
+    public String lastName;
+    public String email;
+    public String mobilePhone;
+}
+
+global class AccountRequest {
+    public String externalAccountId;
+    public String accountName;
+    public String phone;
+    public String website;
+    public List<ContactRequest> contacts;
+}
+
+global class RequestWrapper {
+    public List<AccountRequest> accounts;
+}
+
+//=========================
+// Response Classes
+//=========================
+
+global class ContactResponse {
+    public Id contactId;
+    public String externalContactId;
+    public String status;
+}
+
+global class AccountResponse {
+    public Id accountId;
+    public String externalAccountId;
+    public String status;
+    public List<ContactResponse> contacts;
+}
+
+@HttpPost
+global static List<AccountResponse> upsertAccountsAndContacts() {
+
+    RequestWrapper requestBody =
+        (RequestWrapper) JSON.deserialize(
+            RestContext.request.requestBody.toString(),
+            RequestWrapper.class
+        );
+
+    List<AccountResponse> responseList =
+        new List<AccountResponse>();
+
+    if (requestBody == null ||
+        requestBody.accounts == null ||
+        requestBody.accounts.isEmpty()) {
+
+        RestContext.response.statusCode = 400;
+        return responseList;
+    }
+
+    //=========================================
+    // Prepare Accounts for Upsert
+    //=========================================
+
+    List<Account> accountsToUpsert = new List<Account>();
+
+    for (AccountRequest req : requestBody.accounts) {
+
+        accountsToUpsert.add(
+            new Account(
+                External_Account_Id__c = req.externalAccountId,
+                Name = req.accountName,
+                Phone = req.phone,
+                Website = req.website
+            )
+        );
+    }
+
+    upsert accountsToUpsert External_Account_Id__c;
+
+    //=========================================
+    // Build Account Map
+    //=========================================
+
+    Map<String, Id> accountIdByExternalId =
+        new Map<String, Id>();
+
+    for (Account acc : [
+        SELECT Id, External_Account_Id__c
+        FROM Account
+        WHERE External_Account_Id__c IN
+            :new Map<String, Account>(
+                accountsToUpsert
+            ).keySet()
+    ]) {
+
+        accountIdByExternalId.put(
+            acc.External_Account_Id__c,
+            acc.Id
+        );
+    }
+
+    // Alternative safer mapping directly from
+    // DML result:
+
+    accountIdByExternalId.clear();
+
+    for (Account acc : accountsToUpsert) {
+        accountIdByExternalId.put(
+            acc.External_Account_Id__c,
+            acc.Id
+        );
+    }
+
+    //=========================================
+    // Prepare Contacts
+    //=========================================
+
+    List<Contact> contactsToUpsert =
+        new List<Contact>();
+
+    for (AccountRequest accReq : requestBody.accounts) {
+
+        Id accountId =
+            accountIdByExternalId.get(
+                accReq.externalAccountId
+            );
+
+        if (accReq.contacts == null) {
+            continue;
+        }
+
+        for (ContactRequest conReq :
+                accReq.contacts) {
+
+            contactsToUpsert.add(
+                new Contact(
+                    External_Contact_Id__c =
+                        conReq.externalContactId,
+                    FirstName = conReq.firstName,
+                    LastName = conReq.lastName,
+                    Email = conReq.email,
+                    MobilePhone = conReq.mobilePhone,
+                    AccountId = accountId
+                )
+            );
+        }
+    }
+
+    if (!contactsToUpsert.isEmpty()) {
+        upsert contactsToUpsert
+            External_Contact_Id__c;
+    }
+
+    //=========================================
+    // Build Response
+    //=========================================
+
+    Integer contactIndex = 0;
+
+    for (Integer i = 0;
+         i < requestBody.accounts.size();
+         i++) {
+
+        AccountRequest accReq =
+            requestBody.accounts[i];
+
+        AccountResponse accResp =
+            new AccountResponse();
+
+        accResp.accountId =
+            accountsToUpsert[i].Id;
+
+        accResp.externalAccountId =
+            accReq.externalAccountId;
+
+        accResp.status = 'SUCCESS';
+
+        accResp.contacts =
+            new List<ContactResponse>();
+
+        if (accReq.contacts != null) {
+
+            for (Integer j = 0;
+                 j < accReq.contacts.size();
+                 j++) {
+
+                ContactRequest conReq =
+                    accReq.contacts[j];
+
+                ContactResponse conResp =
+                    new ContactResponse();
+
+                conResp.contactId =
+                    contactsToUpsert[contactIndex].Id;
+
+                conResp.externalContactId =
+                    conReq.externalContactId;
+
+                conResp.status = 'SUCCESS';
+
+                accResp.contacts.add(conResp);
+
+                contactIndex++;
+            }
+        }
+
+        responseList.add(accResp);
+    }
+
+    return responseList;
+}
+```
+
+}
