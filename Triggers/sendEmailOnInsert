@@ -1,0 +1,64 @@
+//Trigger
+trigger ContactTrigger on Contact (after insert) {
+    if(Trigger.isAfter && Trigger.isInsert){
+        ContactHelper.sentContactEmails(Trigger.new);
+    }
+}
+
+// Helper Class 
+
+public class ContactHelper {
+    public static void sentContactEmails(List<Contact> conList){
+        Set<Id> conIds = new Set<Id>();
+        
+        for(Contact con : conList){
+            if(con.AccountId != null){
+                conIds.add(con.Id);
+            }
+        }
+        
+        if(conIds.isEmpty()) return;
+        
+        // Fetch the specific org-wide email address you just saved and verified
+        OrgWideEmailAddress[] owea = [
+            SELECT Id 
+            FROM OrgWideEmailAddress 
+            WHERE Address = 'khushboosuthar@cyntexa.com' 
+            LIMIT 1
+        ];
+        
+        EmailTemplate template = [
+            SELECT Id
+            FROM EmailTemplate
+            WHERE DeveloperName = 'AccountEmailTestTemplate'
+            LIMIT 1
+        ];
+        
+        List<Messaging.SingleEmailMessage> emails = new List<Messaging.SingleEmailMessage>();
+        
+        for (Contact rec : [
+            SELECT Id, AccountId, Email
+            FROM Contact
+            WHERE Id IN :conIds AND Email != null
+        ]) {
+            
+            Messaging.SingleEmailMessage mail = new Messaging.SingleEmailMessage();
+            
+            mail.setTemplateId(template.Id);
+            mail.setTargetObjectId(rec.Id); 
+            mail.setWhatId(rec.AccountId);  
+            mail.setSaveAsActivity(false);
+            
+            // 2. Explicitly bind the verified email address as the sender identity
+            if (!owea.isEmpty()) {
+                mail.setOrgWideEmailAddressId(owea[0].Id);
+            }
+            
+            emails.add(mail);
+        }
+        
+        if (!emails.isEmpty()) {
+            Messaging.sendEmail(emails);
+        }
+    }
+}
