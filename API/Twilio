@@ -1,0 +1,67 @@
+
+................................................................
+
+// Apex class
+
+public class TwilioSMSController {
+    
+    // The @future annotation is required to make callouts from Triggers
+    @future(callout=true)
+    public static void sendWelcomeSMS(String toPhoneNumber, String contactName) {
+        
+        // Formulate your message
+        String smsBody = 'Hello ' + contactName + ', welcome to our network!';
+        
+        Http http = new Http();
+        HttpRequest request = new HttpRequest();
+        
+        // Use the Named Credential we set up earlier
+        request.setEndpoint('callout:Twilio_API/2010-04-01/Accounts/AC4db9a7a89c39bd824140715a906156af/Messages.json');
+        //request.setEndpoint('callout:Twilio_API/Messages.json');
+        
+        request.setMethod('POST');
+        request.setHeader('Content-Type', 'application/x-www-form-urlencoded');
+        
+        // Add your verified Twilio phone number here
+        String fromPhoneNumber = '+18602540181'; 
+        
+        String body = 'To=' + EncodingUtil.urlEncode(toPhoneNumber, 'UTF-8') +
+                      '&From=' + EncodingUtil.urlEncode(fromPhoneNumber, 'UTF-8') +
+                      '&Body=' + EncodingUtil.urlEncode(smsBody, 'UTF-8');
+                      
+        request.setBody(body);
+        
+        try {
+            HttpResponse response = http.send(request);
+            if(response.getStatusCode() != 201) {
+                System.debug('Twilio Error: ' + response.getBody());
+            }
+        } catch(Exception e) {
+            System.debug('Callout Exception: ' + e.getMessage());
+        }
+    }
+}
+
+
+
+------------------------------------------------------------------
+
+// Apex Trigger
+
+-------------------------------------------------------------------
+
+trigger ContactTrigger on Contact (after insert) {
+    
+    // Consolidate into a single block
+    if(Trigger.isAfter && Trigger.isInsert){
+        
+        // 1. Loop through contacts to find valid phone numbers
+        for (Contact newContact : Trigger.new) {
+            
+            if (String.isNotBlank(newContact.MobilePhone)) {
+                // Invoke the future method from your class
+                TwilioSMSController.sendWelcomeSMS(newContact.MobilePhone, newContact.FirstName);
+            }
+        }
+    }
+}
