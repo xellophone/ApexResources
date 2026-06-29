@@ -1,11 +1,108 @@
 -------------------------------------------------
 // HTML
 -------------------------------------------------
-
+<template>
+    <lightning-card title="Record Distribution by Status Donut Chart" icon-name="utility:chart">
+        <div class="slds-m-around_medium chart-container">
+            <canvas class="donut-chart" lwc:dom="manual"></canvas>
+        </div>
+    </lightning-card>
+</template>
 -------------------------------------------------
 // JS
 -------------------------------------------------
+import { LightningElement, wire } from 'lwc';
+import { loadScript } from 'lightning/platformResourceLoader';
+import chartjs from '@salesforce/resourceUrl/chartjs'; 
+import getStatusCounts from '@salesforce/apex/ChartController.getStatusCounts';
 
+export default class DonutChart extends LightningElement {
+    chart;
+    chartInitialized = false;
+    statusData = {};
+
+    // Wire the aggregated object counts from Apex
+    @wire(getStatusCounts)
+    wiredStatusData({ error, data }) {
+        if (data) {
+            this.statusData = data;
+            if (this.chartInitialized) {
+                this.renderChart();
+            }
+        } else if (error) {
+            console.error('Error fetching status data:', error);
+        }
+    }
+
+    renderedCallback() {
+        if (this.chartInitialized) {
+            return;
+        }
+        this.chartInitialized = true;
+
+        // Load your imported chart.min.js file from Static Resources
+        loadScript(this, chartjs)
+            .then(() => {
+                if (Object.keys(this.statusData).length > 0) {
+                    this.renderChart();
+                }
+            })
+            .catch(error => {
+                console.error('Error loading ChartJS library:', error);
+            });
+    }
+
+    renderChart() {
+        const labels = Object.keys(this.statusData);
+        const counts = Object.values(this.statusData);
+        
+        // Dynamic percentage calculation sum
+        const totalRecords = counts.reduce((sum, val) => sum + val, 0);
+
+        // Vibrant palette for your status slices
+        const backgroundColors = [
+            '#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0', '#9966FF', '#FF9F40', '#2ecc71'
+        ];
+
+        const ctx = this.template.querySelector('canvas.donut-chart').getContext('2d');
+
+        // Prevent layout bleeding or overlapping canvas re-renders
+        if (this.chart) {
+            this.chart.destroy();
+        }
+
+        this.chart = new window.Chart(ctx, {
+            type: 'doughnut', 
+            data: {
+                labels: labels,
+                datasets: [{
+                    data: counts,
+                    backgroundColor: backgroundColors.slice(0, labels.length),
+                    hoverOffset: 6
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                cutout: '65%', // Controls donut inner ring thickness
+                plugins: {
+                    legend: {
+                        position: 'bottom'
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                const value = context.parsed;
+                                const percentage = ((value / totalRecords) * 100).toFixed(1);
+                                return ` ${context.label}: ${value} (${percentage}%)`;
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
+}
 -------------------------------------------------
 // CSS
 -------------------------------------------------
@@ -13,3 +110,35 @@
 -------------------------------------------------
 // Apex
 -------------------------------------------------
+
+public with sharing class ChartController {
+    @AuraEnabled(cacheable=true)
+    public static Map<String, Integer> getStatusCounts() {
+        Map<String, Integer> resultMap = new Map<String, Integer>();
+        
+        // Aggregate query to count records grouped by Status
+        for (AggregateResult ar : [SELECT Status__c, COUNT(Id) total FROM testChart__c GROUP BY Status__c]) {
+            String statusValue = (String)ar.get('Status__c');
+            Integer count = (Integer)ar.get('total');
+            
+            if (String.isBlank(statusValue)) {
+                statusValue = 'Not Specified';
+            }
+            resultMap.put(statusValue, count);
+        }
+        return resultMap;
+    }
+
+    @AuraEnabled(cacheable=true)
+    public static Map<String, Integer> getStatusCount() {
+        Map<String, Integer> statusMap = new Map<String, Integer>();
+        // Add your SOQL aggregate query logic here
+        // Example output:
+        statusMap.put('Approved', 15);
+        statusMap.put('Pending', 8);
+        statusMap.put('Rejected', 3);
+        
+        return statusMap;
+    }
+
+}
