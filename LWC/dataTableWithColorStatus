@@ -4,11 +4,172 @@
 -------------------------------------------------
 // HTML
 -------------------------------------------------
+<template>
+    <lightning-card title="Data Table with Custom Status">
 
+        <div class="table-container slds-scrollable_y" onscroll={handleScroll}>
+            <table class="slds-table slds-table_cell-buffer slds-table_bordered slds-table_col-bordered">
+                <thead>
+                    <tr class="slds-line-height_reset">
+                        <th scope="col"><div class="slds-truncate" title="Shipment Name">Shipment Name</div></th>
+                        <th scope="col"><div class="slds-truncate" title="Address">Address</div></th>
+                        <th scope="col"><div class="slds-truncate" title="Shipment Type">Shipment Type</div></th>
+                        <th scope="col"><div class="slds-truncate" title="Status">Status</div></th>
+                        <th scope="col"><div class="slds-truncate" title="COD Amount">COD Amount</div></th>
+                        <th scope="col"><div class="slds-truncate" title="Account Name">Account Name</div></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <template for:each={accountData} for:item="ship">
+                        <tr class="slds-hint-parent" key={ship.Id}>
+                            <td><div class="slds-truncate">{ship.Name}</div></td>
+                            <td><div class="slds-truncate">{ship.Destination_Address__c}</div></td>
+                            <td><div class="slds-truncate">{ship.Shipment_Type__c}</div></td>
+                            <td>
+                                <span class={ship.statusClass}>{ship.Status__c}</span>
+                            </td>
+                            <td><div class="slds-truncate">{ship.COD_Amount__c}</div></td>
+                            <td>
+                                <div class="slds-truncate">
+                                    <template if:true={ship.recordLink}>
+                                        <a href={ship.recordLink} target="_self">{ship.accountName}</a>
+                                    </template>
+                                </div>
+                            </td>
+                        </tr>
+                    </template>
+                </tbody>
+            </table>
+
+            <template if:true={isLoading}>
+                <div class="slds-p-around_small slds-position_relative">
+                    <lightning-spinner alternative-text="Loading" size="small"></lightning-spinner>
+                </div>
+            </template>
+        </div>
+
+        <template if:true={showEndMessage}>
+            <div class="slds-text-align_center slds-p-around_medium">
+                <strong>You have reached the end of records.</strong>
+            </div>
+        </template>
+
+    </lightning-card>
+</template>
 -------------------------------------------------
 // JS
 -------------------------------------------------
+import { LightningElement, track } from 'lwc';
+import getShipmentRecords from '@salesforce/apex/ShipmentController.getShipmentRecords';
 
+export default class DataTableStatus extends LightningElement {
+    @track accountData = [];
+    limitSize = 15; // Increased slightly for a better scrollable view height
+    offsetSize = 0;
+
+    isLoading = false;
+    hasMore = true;
+    showEndMessage = false;
+
+    connectedCallback() {
+        this.loadAccounts();
+    }
+
+    async loadAccounts() {
+        if (this.isLoading || !this.hasMore) {
+            return;
+        }
+
+        this.isLoading = true;
+
+        try {
+            const result = await getShipmentRecords({
+                limitSize: this.limitSize,
+                offsetSize: this.offsetSize
+            });
+
+            if (result && result.records && result.records.length) {
+                const newRecords = result.records.map(record => {
+                    let statusClass = 'status-badge ';
+                    if (record.Status__c === 'Pending') {
+                        statusClass += 'status-pending';
+                    } else if (record.Status__c === 'Delivered') {
+                        statusClass += 'status-delivered';
+                    } else if (record.Status__c === 'Failed') {
+                        statusClass += 'status-failed';
+                    } else {
+                        statusClass += 'status-default';
+                    }
+
+                    return {
+                        ...record,
+                        recordLink: record.Account__c ? '/' + record.Account__c : '',
+                        accountName: record.Account__r ? record.Account__r.Name : '',
+                        statusClass: statusClass 
+                    };
+                });
+
+                this.accountData = [...this.accountData, ...newRecords];
+                this.offsetSize += result.records.length;
+            }
+
+            this.hasMore = result.hasMore;
+            this.showEndMessage = !this.hasMore;
+
+        } catch (error) {
+            console.error('Error loading accounts', error);
+        } finally {
+            this.isLoading = false;
+        }
+    }
+
+    // Handles infinite scroll threshold detection dynamically
+    handleScroll(event) {
+        const target = event.target;
+        // Triggers loading when the user scrolls within 20px of the bottom
+        const bottomReached = target.scrollHeight - target.scrollTop <= target.clientHeight + 20;
+
+        if (bottomReached && !this.isLoading && this.hasMore) {
+            this.showEndMessage = false;
+            this.loadAccounts();
+        }
+    }
+}
 -------------------------------------------------
 // CSS
+-------------------------------------------------
+.table-container {
+    height: 270px; /* Approximately 5 rows */
+}
+
+/* Custom Status Badges */
+.status-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-weight: bold;
+    color: #ffffff !important;
+    font-size: 11px;
+    text-transform: uppercase;
+}
+
+.status-pending {
+    background-color: #ff9f00; /* Orange */
+}
+
+.status-delivered {
+    background-color: #2e7d32; /* Green */
+}
+
+.status-failed {
+    background-color: #d32f2f; /* Red */
+}
+
+.status-default {
+    background-color: #747474; /* Grey fallback */
+}
+
+
+-------------------------------------------------
+// Apex
 -------------------------------------------------
